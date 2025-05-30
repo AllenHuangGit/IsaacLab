@@ -68,6 +68,8 @@ class ContainerInterface:
             # insert a hyphen before the suffix if a suffix is given
             self.suffix = f"-{suffix}"
 
+            os.environ["COMPOSE_PROJECT_NAME"] = f"isaaclab{self.suffix}"
+
         self.container_name = f"isaac-lab-{self.profile}{self.suffix}"
         self.image_name = f"isaac-lab-{self.profile}{self.suffix}:latest"
 
