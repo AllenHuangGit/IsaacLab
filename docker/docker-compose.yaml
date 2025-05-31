@@ -61,6 +61,11 @@ x-default-isaac-lab-volumes: &default-isaac-lab-volumes
     source: isaac-lab-data
     target: ${DOCKER_ISAACLAB_PATH}/data_storage
 
+    # * The following is used to mount our extension codebase
+  - type: bind
+    source: /home/allen/g1-humanoid
+    target: /workspace/g1-humanoid
+
 x-default-isaac-lab-environment: &default-isaac-lab-environment
   - ISAACSIM_PATH=${DOCKER_ISAACLAB_PATH}/_isaac_sim
   - OMNI_KIT_ALLOW_ROOT=1
