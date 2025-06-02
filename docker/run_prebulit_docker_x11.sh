@@ -3,7 +3,7 @@ docker pull nvcr.io/nvidia/isaac-lab:2.1.0
 docker tag nvcr.io/nvidia/isaac-lab:2.1.0 isaac-lab-anlun:2.1.0
 
 xhost +
-docker run --name isaac-lab-anlun --entrypoint bash -it --gpus all -e "ACCEPT_EULA=Y" --rm --network=host \
+docker run --name isaac-lab-anlun --entrypoint bash -it --gpus all -e "ACCEPT_EULA=Y" --network=host \
    -e "PRIVACY_CONSENT=Y" \
    -e DISPLAY \
    -v $HOME/.Xauthority:/root/.Xauthority \
