@@ -35,15 +35,18 @@ Guidelines for modifications:
 
 ## Contributors
 
+* Alessandro Assirelli
 * Alice Zhou
 * Amr Mousa
 * Andrej Orsula
 * Anton Bjørndahl Mortensen
+* Antonin Raffin
 * Arjun Bhardwaj
 * Ashwin Varghese Kuruttukulam
 * Bikram Pandit
 * Bingjie Tang
 * Brayden Zhang
+* Brian Bingham
 * Cameron Upright
 * Calvin Yu
 * Cheng-Rong Lai
@@ -73,6 +76,7 @@ Guidelines for modifications:
 * Jinqi Wei
 * Johnson Sun
 * Kaixi Bao
+* Kris Wilson
 * Kourosh Darvish
 * Kousheek Chakraborty
 * Lionel Gulich
@@ -85,6 +89,7 @@ Guidelines for modifications:
 * Miguel Alonso Jr
 * Muhong Guo
 * Nicola Loi
+* Norbert Cygiert
 * Nuoyan Chen (Alvin)
 * Nuralem Abizov
 * Ori Gadot
@@ -101,7 +106,9 @@ Guidelines for modifications:
 * Rosario Scalise
 * Ryley McCarroll
 * Shafeef Omar
+* Shaoshu Su
 * Shundo Kishi
+* Stefan Van de Mosselaer
 * Stephan Pleines
 * Tyler Lum
 * Victor Khaustov
@@ -117,6 +124,7 @@ Guidelines for modifications:
 * Zhengyu Zhang
 * Ziqi Fan
 * Zoe McCarthy
+* David Leon
 
 ## Acknowledgements
 
