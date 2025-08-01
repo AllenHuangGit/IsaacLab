@@ -67,8 +67,8 @@ x-default-isaac-lab-volumes: &default-isaac-lab-volumes
 
     # * The following is used to mount our extension codebase
   - type: bind
-    source: /home/allen/g1-humanoid
-    target: /workspace/g1-humanoid
+    source: /home/allen/unitree_rl_lab
+    target: /workspace/unitree_rl_lab
 
 x-default-isaac-lab-environment: &default-isaac-lab-environment
   - ISAACSIM_PATH=${DOCKER_ISAACLAB_PATH}/_isaac_sim
