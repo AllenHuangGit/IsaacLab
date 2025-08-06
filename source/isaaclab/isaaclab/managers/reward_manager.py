@@ -35,6 +35,14 @@ class RewardManager(ManagerBase):
         of the environment. This is done to ensure that the computed reward terms are balanced with
         respect to the chosen time-step interval in the environment.
 
+    .. Anlun's changes::
+
+        For curriculum learning, the reward manager supports per-environment weights for each reward
+        term. These weights can be dynamically adjusted during training using the curriculum learning
+        methods provided (e.g., ``set_term_weight``, ``get_term_weight``, ``set_all_term_weights``).
+        The per-environment weights are stored in the ``term_weights`` property and initialized with
+        the config weights.
+
     """
 
     _env: ManagerBasedRLEnv
@@ -63,6 +71,15 @@ class RewardManager(ManagerBase):
 
         # Buffer which stores the current step reward for each term for each environment
         self._step_reward = torch.zeros((self.num_envs, len(self._term_names)), dtype=torch.float, device=self.device)
+        
+        # * Anlun's changes: (Add start)
+        # Tensor to store per-environment weights for each reward term (for curriculum learning)
+        # Shape: (num_envs, num_terms)
+        self._env_term_weights = torch.zeros((self.num_envs, len(self._term_names)), dtype=torch.float, device=self.device)
+        # Initialize with default weights from config
+        for term_idx, term_cfg in enumerate(self._term_cfgs):
+            self._env_term_weights[:, term_idx] = term_cfg.weight
+        # * Anlun's changes: (Add end)
 
     def __str__(self) -> str:
         """Returns: A string representation for reward manager."""
@@ -92,6 +109,17 @@ class RewardManager(ManagerBase):
     def active_terms(self) -> list[str]:
         """Name of active reward terms."""
         return self._term_names
+
+    # * Anlun's changes: (Add start)
+    @property
+    def term_weights(self) -> torch.Tensor:
+        """Per-environment weights for each reward term.
+        
+        Returns:
+            Tensor of shape (num_envs, num_terms) containing the current weights.
+        """
+        return self._env_term_weights
+    # * Anlun's changes: (Add end)
 
     """
     Operations.
@@ -141,12 +169,26 @@ class RewardManager(ManagerBase):
         self._reward_buf[:] = 0.0
         # iterate over all the reward terms
         for term_idx, (name, term_cfg) in enumerate(zip(self._term_names, self._term_cfgs)):
-            # skip if weight is zero (kind of a micro-optimization)
-            if term_cfg.weight == 0.0:
+            # // # skip if weight is zero (kind of a micro-optimization)
+            # // if term_cfg.weight == 0.0:
+            # * Anlun's changes: (Add start)
+            # get per-environment weights for this term
+            env_weights = self._env_term_weights[:, term_idx]
+            
+            # skip if all weights are zero (kind of a micro-optimization)
+            if torch.all(env_weights == 0.0):
+            # * Anlun's changes: (Add end)
                 self._step_reward[:, term_idx] = 0.0
                 continue
+            
             # compute term's value
-            value = term_cfg.func(self._env, **term_cfg.params) * term_cfg.weight * dt
+            # // value = term_cfg.func(self._env, **term_cfg.params) * term_cfg.weight * dt
+            # * Anlun's changes: (Add start)
+            term_value = term_cfg.func(self._env, **term_cfg.params)
+            # apply per-environment weights and dt
+            value = term_value * env_weights * dt
+            # * Anlun's changes: (Add end)
+
             # update total reward
             self._reward_buf += value
             # update episodic sum
@@ -208,6 +250,77 @@ class RewardManager(ManagerBase):
         for idx, name in enumerate(self._term_names):
             terms.append((name, [self._step_reward[env_idx, idx].cpu().item()]))
         return terms
+
+    # * Anlun's changes: (Add start)
+    """
+    Operations - Environment-specific weights (for curriculum learning).
+    """
+
+    def set_term_weight(self, term_name: str, weight: torch.Tensor | float, env_ids: Sequence[int] | None = None):
+        """Sets the weight of the specified term for the given environment(s).
+
+        Args:
+            term_name: The name of the reward term.
+            weight: The new weight to set for the term.
+            env_ids: The environment ids to set the weight for. If None, sets for all environments.
+
+        Raises:
+            ValueError: If the term name is not found.
+        """
+        if term_name not in self._term_names:
+            raise ValueError(f"Reward term '{term_name}' not found.")
+        
+        # resolve environment ids
+        if env_ids is None:
+            env_slice = slice(None)
+        else:
+            env_slice = env_ids
+        
+        # set the weight
+        term_idx = self._term_names.index(term_name)
+        self._env_term_weights[env_slice, term_idx] = weight
+
+    def get_term_weight(self, term_name: str, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+        """Gets the weight of the specified term for the given environment(s).
+
+        Args:
+            term_name: The name of the reward term.
+            env_ids: The environment ids to get the weight for. If None, gets for all environments.
+
+        Returns:
+            The weight of the specified term for the given environment(s).
+
+        Raises:
+            ValueError: If the term name is not found.
+        """
+        if term_name not in self._term_names:
+            raise ValueError(f"Reward term '{term_name}' not found.")
+        
+        # resolve environment ids
+        if env_ids is None:
+            env_slice = slice(None)
+        else:
+            env_slice = env_ids
+        
+        # return the weight
+        term_idx = self._term_names.index(term_name)
+        return self._env_term_weights[env_slice, term_idx]
+
+    def reset_term_weights_to_config(self, env_ids: Sequence[int] | None = None):
+        """Resets the weights of all reward terms to their original config values.
+
+        Args:
+            env_ids: The environment ids to reset. If None, resets all environments.
+        """
+        if env_ids is None:
+            env_slice = slice(None)
+        else:
+            env_slice = env_ids
+            
+        for term_idx, term_cfg in enumerate(self._term_cfgs):
+            self._env_term_weights[env_slice, term_idx] = term_cfg.weight
+
+    # * Anlun's changes: (Add end)
 
     """
     Helper functions.
