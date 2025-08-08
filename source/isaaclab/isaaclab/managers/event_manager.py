@@ -70,6 +70,11 @@ class EventManager(ManagerBase):
         self._mode_term_cfgs: dict[str, list[EventTermCfg]] = dict()
         self._mode_class_term_cfgs: dict[str, list[EventTermCfg]] = dict()
 
+        # * Anlun's changes start:
+        # create buffer to store return values from event functions
+        self._term_return_values: dict[str, any] = dict()
+        # * Anlun's changes end
+
         # call the base class (this will parse the terms config)
         super().__init__(cfg, env)
 
@@ -115,6 +120,16 @@ class EventManager(ManagerBase):
     def available_modes(self) -> list[str]:
         """Modes of events."""
         return list(self._mode_term_names.keys())
+
+    # * Anlun's changes start:
+    @property
+    def term_return_values(self) -> dict[str, any]:
+        """Return values from event terms.
+        
+        The keys are the term names and the values are the return values from the event functions.
+        """
+        return self._term_return_values
+    # * Anlun's changes end
 
     """
     Operations.
@@ -167,6 +182,10 @@ class EventManager(ManagerBase):
         steps that have happened since the last trigger of the function is equal to its configured parameter for
         the number of environment steps between resets.
 
+        Anlun's changes:
+        Return values from event functions are automatically captured and stored. They can be accessed using
+        the `term_return_values` property or the `get_term_return_value` method.
+
         Args:
             mode: The mode of event.
             env_ids: The indices of the environments to apply the event to.
@@ -217,7 +236,14 @@ class EventManager(ManagerBase):
                         self._interval_term_time_left[index][:] = sampled_interval
 
                         # call the event term (with None for env_ids)
-                        term_cfg.func(self._env, None, **term_cfg.params)
+                        # * Anlun's changes start
+                        # // term_cfg.func(self._env, None, **term_cfg.params)
+                        return_value = term_cfg.func(self._env, None, **term_cfg.params)
+                        # store return value if not None
+                        if return_value is not None:
+                            term_name = self._mode_term_names[mode][index]
+                            self._term_return_values[term_name] = return_value
+                        # * Anlun's changes end
                 else:
                     valid_env_ids = (time_left < 1e-6).nonzero().flatten()
                     if len(valid_env_ids) > 0:
@@ -226,7 +252,14 @@ class EventManager(ManagerBase):
                         self._interval_term_time_left[index][valid_env_ids] = sampled_time
 
                         # call the event term
-                        term_cfg.func(self._env, valid_env_ids, **term_cfg.params)
+                        # * Anlun's changes start
+                        # // term_cfg.func(self._env, valid_env_ids, **term_cfg.params)
+                        return_value = term_cfg.func(self._env, valid_env_ids, **term_cfg.params)
+                        # store return value if not None
+                        if return_value is not None:
+                            term_name = self._mode_term_names[mode][index]
+                            self._term_return_values[term_name] = return_value
+                        # * Anlun's changes end
             elif mode == "reset":
                 # obtain the minimum step count between resets
                 min_step_count = term_cfg.min_step_count_between_reset
@@ -241,7 +274,14 @@ class EventManager(ManagerBase):
                     self._reset_term_last_triggered_once[index][env_ids] = True
 
                     # call the event term with the environment indices
-                    term_cfg.func(self._env, env_ids, **term_cfg.params)
+                    # * Anlun's changes start
+                    # // term_cfg.func(self._env, env_ids, **term_cfg.params)
+                    return_value = term_cfg.func(self._env, env_ids, **term_cfg.params)
+                    # store return value if not None
+                    if return_value is not None:
+                        term_name = self._mode_term_names[mode][index]
+                        self._term_return_values[term_name] = return_value
+                    # * Anlun's changes end
                 else:
                     # extract last reset step for this term
                     last_triggered_step = self._reset_term_last_triggered_step_id[index][env_ids]
@@ -267,10 +307,24 @@ class EventManager(ManagerBase):
                         self._reset_term_last_triggered_step_id[index][valid_env_ids] = global_env_step_count
 
                         # call the event term
-                        term_cfg.func(self._env, valid_env_ids, **term_cfg.params)
+                        # * Anlun's changes start
+                        # // term_cfg.func(self._env, valid_env_ids, **term_cfg.params)
+                        return_value = term_cfg.func(self._env, valid_env_ids, **term_cfg.params)
+                        # store return value if not None
+                        if return_value is not None:
+                            term_name = self._mode_term_names[mode][index]
+                            self._term_return_values[term_name] = return_value
+                        # * Anlun's changes end
             else:
                 # call the event term
-                term_cfg.func(self._env, env_ids, **term_cfg.params)
+                # * Anlun's changes start
+                # // term_cfg.func(self._env, env_ids, **term_cfg.params)
+                return_value = term_cfg.func(self._env, env_ids, **term_cfg.params)
+                # store return value if not None
+                if return_value is not None:
+                    term_name = self._mode_term_names[mode][index]
+                    self._term_return_values[term_name] = return_value
+                # * Anlun's changes end
 
     """
     Operations - Term settings.
@@ -317,6 +371,36 @@ class EventManager(ManagerBase):
             if term_name in terms:
                 return self._mode_term_cfgs[mode][terms.index(term_name)]
         raise ValueError(f"Event term '{term_name}' not found.")
+
+    # * Anlun's changes start:
+    def get_term_return_value(self, term_name: str) -> any:
+        """Gets the return value for the specified term.
+
+        Args:
+            term_name: The name of the event term.
+
+        Returns:
+            The return value of the event term.
+
+        Raises:
+            ValueError: If the term name is not found or has no return value.
+        """
+        if term_name in self._term_return_values:
+            return self._term_return_values[term_name]
+        raise ValueError(f"Event term '{term_name}' not found or has no return value.")
+
+    def clear_term_return_values(self, term_name: str | None = None):
+        """Clears stored return values.
+
+        Args:
+            term_name: The specific term name to clear. If None, clears all return values.
+        """
+        if term_name is not None:
+            if term_name in self._term_return_values:
+                del self._term_return_values[term_name]
+        else:
+            self._term_return_values.clear()
+    # * Anlun's changes end
 
     """
     Helper functions.
