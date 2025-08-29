@@ -122,10 +122,6 @@ class RslRlPpoAlgorithmCfg:
     in which case RND is not used.
     """
 
-    # Upper body curriculum configuration
-    upper_body_cur_cfg: dict | None = None
-    """Configuration for upper body curriculum training. Default is None, in which case it is not used."""
-
 
 #########################
 # Runner configurations #
