@@ -352,3 +352,21 @@ class TerminationTermCfg(ManagerTermBaseCfg):
     Note:
         These usually correspond to tasks that have a fixed time limit.
     """
+
+    track_only: bool = False
+    """Whether to only track the termination condition without triggering episode termination. Defaults to False.
+
+    When set to True, the termination condition is computed and stored in the term buffer, but does NOT
+    contribute to the actual termination signal (won't reset the environment). This is useful for:
+    
+    * Using termination conditions as reward signals (e.g., penalizing states that would normally terminate)
+    * Monitoring termination conditions during training without actually terminating episodes
+    * Implementing soft terminations where the agent is penalized but continues learning
+    
+    The tracked values can be accessed via :meth:`TerminationManager.get_term()` for use in reward functions
+    or other computations. When track_only is True, both time_out and terminated signals ignore this term.
+    
+    Note:
+        This mode is mutually tracked with actual termination - if track_only is True, the term
+        will not contribute to time_outs or terminated signals regardless of the time_out setting.
+    """

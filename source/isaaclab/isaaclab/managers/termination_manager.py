@@ -67,6 +67,7 @@ class TerminationManager(ManagerBase):
         # create buffer for managing termination per environment
         self._truncated_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._terminated_buf = torch.zeros_like(self._truncated_buf)
+        self._tracked_buf = torch.zeros_like(self._truncated_buf)
 
     def __str__(self) -> str:
         """Returns: A string representation for termination manager."""
@@ -75,12 +76,12 @@ class TerminationManager(ManagerBase):
         # create table for term information
         table = PrettyTable()
         table.title = "Active Termination Terms"
-        table.field_names = ["Index", "Name", "Time Out"]
+        table.field_names = ["Index", "Name", "Time Out", "Track Only"]
         # set alignment of table columns
         table.align["Name"] = "l"
         # add info on each term
         for index, (name, term_cfg) in enumerate(zip(self._term_names, self._term_cfgs)):
-            table.add_row([index, name, term_cfg.time_out])
+            table.add_row([index, name, term_cfg.time_out, term_cfg.track_only])
         # convert table to string
         msg += table.get_string()
         msg += "\n"
@@ -120,6 +121,18 @@ class TerminationManager(ManagerBase):
         """
         return self._terminated_buf
 
+    @property
+    def tracked(self) -> torch.Tensor:
+        """The tracked-only termination conditions signal. Shape is (num_envs,).
+
+        This signal represents the logical OR of all termination terms configured with track_only=True.
+        These conditions are computed and tracked but do NOT trigger actual episode termination.
+        
+        This is useful for reward functions that want to check if ANY track-only termination condition
+        is met without querying each term individually.
+        """
+        return self._tracked_buf
+
     """
     Operations.
     """
@@ -152,7 +165,8 @@ class TerminationManager(ManagerBase):
         """Computes the termination signal as union of individual terms.
 
         This function calls each termination term managed by the class and performs a logical OR operation
-        to compute the net termination signal.
+        to compute the net termination signal. Terms with track_only=True are computed and stored but do
+        not contribute to the actual termination signal.
 
         Returns:
             The combined termination signal of shape (num_envs,).
@@ -160,16 +174,23 @@ class TerminationManager(ManagerBase):
         # reset computation
         self._truncated_buf[:] = False
         self._terminated_buf[:] = False
+        self._tracked_buf[:] = False
         # iterate over all the termination terms
         for name, term_cfg in zip(self._term_names, self._term_cfgs):
             value = term_cfg.func(self._env, **term_cfg.params)
+            # store the term value for tracking
+            self._term_dones[name][:] = value
+            
+            # skip track_only terms - they don't contribute to actual termination
+            if term_cfg.track_only:
+                self._tracked_buf |= value
+                continue
+                
             # store timeout signal separately
             if term_cfg.time_out:
                 self._truncated_buf |= value
             else:
                 self._terminated_buf |= value
-            # add to episode dones
-            self._term_dones[name][:] = value
         # return combined termination signal
         return self._truncated_buf | self._terminated_buf
 
