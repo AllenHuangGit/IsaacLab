@@ -68,6 +68,14 @@ class TerminationManager(ManagerBase):
         self._truncated_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._terminated_buf = torch.zeros_like(self._truncated_buf)
         self._tracked_buf = torch.zeros_like(self._truncated_buf)
+        self._delayed_terminated_buf = torch.zeros_like(self._truncated_buf)
+        # create buffers for tracking delayed termination for track_only terms
+        self._track_only_first_trigger_time = dict()
+        for term_name, term_cfg in zip(self._term_names, self._term_cfgs):
+            if term_cfg.track_only:
+                self._track_only_first_trigger_time[term_name] = torch.full(
+                    (self.num_envs,), -1.0, device=self.device, dtype=torch.float
+                )
 
     def __str__(self) -> str:
         """Returns: A string representation for termination manager."""
@@ -76,12 +84,13 @@ class TerminationManager(ManagerBase):
         # create table for term information
         table = PrettyTable()
         table.title = "Active Termination Terms"
-        table.field_names = ["Index", "Name", "Time Out", "Track Only"]
+        table.field_names = ["Index", "Name", "Time Out", "Track Only", "Delay (s)"]
         # set alignment of table columns
         table.align["Name"] = "l"
         # add info on each term
         for index, (name, term_cfg) in enumerate(zip(self._term_names, self._term_cfgs)):
-            table.add_row([index, name, term_cfg.time_out, term_cfg.track_only])
+            delay_str = f"{term_cfg.track_only_delay:.2f}" if term_cfg.track_only and term_cfg.track_only_delay > 0 else "-"
+            table.add_row([index, name, term_cfg.time_out, term_cfg.track_only, delay_str])
         # convert table to string
         msg += table.get_string()
         msg += "\n"
@@ -100,7 +109,7 @@ class TerminationManager(ManagerBase):
     @property
     def dones(self) -> torch.Tensor:
         """The net termination signal. Shape is (num_envs,)."""
-        return self._truncated_buf | self._terminated_buf
+        return self._truncated_buf | self._terminated_buf | self._delayed_terminated_buf
 
     @property
     def time_outs(self) -> torch.Tensor:
@@ -117,6 +126,19 @@ class TerminationManager(ManagerBase):
         """The terminated signal (reaching a terminal state). Shape is (num_envs,).
 
         This signal is set to true if the environment has reached a terminal state defined by the environment.
+        This includes both immediate terminations (task success, task failure, robot falling, etc.) and
+        delayed terminations (track_only terms that have been violated beyond their configured delay period).
+        
+        To access only immediate terminations without delayed ones, use :attr:`non_delayed_terminated`.
+        """
+        return self._terminated_buf | self._delayed_terminated_buf
+    
+    @property
+    def non_delayed_terminated(self) -> torch.Tensor:
+        """The terminated signal (reaching a terminal state) excluding delayed terminations. Shape is (num_envs,).
+
+        This signal is set to true if the environment has reached a terminal state defined by the environment,
+        excluding any terminations that arise from track_only terms with delays.
         This state may correspond to task success, task failure, robot falling, etc.
         """
         return self._terminated_buf
@@ -132,6 +154,17 @@ class TerminationManager(ManagerBase):
         is met without querying each term individually.
         """
         return self._tracked_buf
+
+    @property
+    def delayed_terminated(self) -> torch.Tensor:
+        """The delayed termination signal from track_only terms. Shape is (num_envs,).
+
+        This signal is set to true when a track_only term with a configured delay
+        has been violated continuously for longer than the specified delay duration.
+        Unlike regular tracked terms, these will trigger actual episode termination
+        after the delay period has elapsed.
+        """
+        return self._delayed_terminated_buf
 
     """
     Operations.
@@ -158,6 +191,9 @@ class TerminationManager(ManagerBase):
         # reset all the reward terms
         for term_cfg in self._class_term_cfgs:
             term_cfg.func.reset(env_ids=env_ids)
+        # reset delay tracking for track_only terms
+        for term_name in self._track_only_first_trigger_time.keys():
+            self._track_only_first_trigger_time[term_name][env_ids] = -1.0
         # return logged information
         return extras
 
@@ -166,7 +202,7 @@ class TerminationManager(ManagerBase):
 
         This function calls each termination term managed by the class and performs a logical OR operation
         to compute the net termination signal. Terms with track_only=True are computed and stored but do
-        not contribute to the actual termination signal.
+        not contribute to the actual termination signal unless the configured delay has passed.
 
         Returns:
             The combined termination signal of shape (num_envs,).
@@ -175,15 +211,41 @@ class TerminationManager(ManagerBase):
         self._truncated_buf[:] = False
         self._terminated_buf[:] = False
         self._tracked_buf[:] = False
+        self._delayed_terminated_buf[:] = False
+        
+        # get current simulation time for delay tracking
+        current_time = self._env.episode_length_buf.float() * self._env.step_dt
+        
         # iterate over all the termination terms
         for name, term_cfg in zip(self._term_names, self._term_cfgs):
             value = term_cfg.func(self._env, **term_cfg.params)
             # store the term value for tracking
             self._term_dones[name][:] = value
             
-            # skip track_only terms - they don't contribute to actual termination
+            # handle track_only terms with potential delay
             if term_cfg.track_only:
                 self._tracked_buf |= value
+                
+                # check if delay is enabled for this term
+                if term_cfg.track_only_delay > 0.0 and name in self._track_only_first_trigger_time:
+                    # track first trigger time for each environment
+                    first_trigger = self._track_only_first_trigger_time[name]
+                    
+                    # update first trigger time for newly violated envs
+                    newly_violated = value & (first_trigger < 0.0)
+                    first_trigger[newly_violated] = current_time[newly_violated]
+                    
+                    # reset timer for envs that are no longer in violation
+                    no_longer_violated = ~value & (first_trigger >= 0.0)
+                    first_trigger[no_longer_violated] = -1.0
+                    
+                    # check if delay has elapsed for violated envs
+                    time_elapsed = current_time - first_trigger
+                    delayed_termination = value & (time_elapsed >= term_cfg.track_only_delay)
+                    
+                    # save delayed termination to separate buffer only
+                    self._delayed_terminated_buf |= delayed_termination
+                # if no delay, skip contributing to termination
                 continue
                 
             # store timeout signal separately
@@ -192,7 +254,7 @@ class TerminationManager(ManagerBase):
             else:
                 self._terminated_buf |= value
         # return combined termination signal
-        return self._truncated_buf | self._terminated_buf
+        return self._truncated_buf | self._terminated_buf | self._delayed_terminated_buf
 
     def get_term(self, name: str) -> torch.Tensor:
         """Returns the termination term with the specified name.

@@ -370,3 +370,24 @@ class TerminationTermCfg(ManagerTermBaseCfg):
         This mode is mutually tracked with actual termination - if track_only is True, the term
         will not contribute to time_outs or terminated signals regardless of the time_out setting.
     """
+
+    track_only_delay: float = 0.0
+    """The delay in seconds before a track_only termination term triggers actual termination. Defaults to 0.0.
+
+    When set to a value greater than 0.0, the termination condition must remain continuously violated
+    for this duration (in simulation time) before the environment is actually terminated. This provides
+    a grace period where the agent can recover from transient failures.
+
+    If the condition is no longer violated before the delay expires, the timer resets and no termination occurs.
+    
+    Use cases:
+    * Allowing brief recoverable failures without terminating (e.g., object wobbling on a tray)
+    * Different tolerance windows for different failure modes
+    * Preventing premature termination from momentary constraint violations
+    
+    Note:
+        This parameter only has an effect when :attr:`track_only` is True. If :attr:`track_only` is False,
+        this parameter is ignored and the term behaves as a normal termination term.
+        
+        If set to 0.0 (default), track_only terms will never trigger termination (original behavior).
+    """
