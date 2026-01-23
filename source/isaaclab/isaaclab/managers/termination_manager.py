@@ -108,7 +108,10 @@ class TerminationManager(ManagerBase):
 
     @property
     def dones(self) -> torch.Tensor:
-        """The net termination signal. Shape is (num_envs,)."""
+        """The net termination signal. Shape is (num_envs,).
+        
+        This combines both truncations (timeouts and delayed terminations) and terminations (terminal states).
+        """
         return self._truncated_buf | self._terminated_buf | self._delayed_terminated_buf
 
     @property
@@ -118,28 +121,21 @@ class TerminationManager(ManagerBase):
         This signal is set to true if the environment has ended after an externally defined condition
         (that is outside the scope of a MDP). For example, the environment may be terminated if the episode has
         timed out (i.e. reached max episode length).
+        
+        This also includes delayed terminations from track_only terms, since they are time-based conditions
+        rather than true terminal states of the MDP.
         """
-        return self._truncated_buf
+        return self._truncated_buf | self._delayed_terminated_buf
 
     @property
     def terminated(self) -> torch.Tensor:
         """The terminated signal (reaching a terminal state). Shape is (num_envs,).
 
         This signal is set to true if the environment has reached a terminal state defined by the environment.
-        This includes both immediate terminations (task success, task failure, robot falling, etc.) and
-        delayed terminations (track_only terms that have been violated beyond their configured delay period).
-        
-        To access only immediate terminations without delayed ones, use :attr:`non_delayed_terminated`.
-        """
-        return self._terminated_buf | self._delayed_terminated_buf
-    
-    @property
-    def non_delayed_terminated(self) -> torch.Tensor:
-        """The terminated signal (reaching a terminal state) excluding delayed terminations. Shape is (num_envs,).
-
-        This signal is set to true if the environment has reached a terminal state defined by the environment,
-        excluding any terminations that arise from track_only terms with delays.
         This state may correspond to task success, task failure, robot falling, etc.
+        
+        Note: This does NOT include delayed terminations from track_only terms, as those are treated as
+        timeouts (truncations) since they are time-based conditions rather than true terminal states.
         """
         return self._terminated_buf
 
