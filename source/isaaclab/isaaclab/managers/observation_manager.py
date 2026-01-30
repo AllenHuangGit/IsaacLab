@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from isaaclab.utils import class_to_dict, modifiers, noise
 from isaaclab.utils.buffers import CircularBuffer
+from isaaclab.utils.buffers.delay_buffer import StochasticDelayBuffer
 
 from .manager_base import ManagerBase, ManagerTermBase
 from .manager_term_cfg import ObservationGroupCfg, ObservationTermCfg
@@ -238,6 +239,9 @@ class ObservationManager(ManagerBase):
             for term_name in self._group_obs_term_names[group_name]:
                 if term_name in self._group_obs_term_history_buffer[group_name]:
                     self._group_obs_term_history_buffer[group_name][term_name].reset(batch_ids=env_ids)
+                # reset terms with delay
+                if term_name in self._group_obs_term_delay_buffer[group_name]:
+                    self._group_obs_term_delay_buffer[group_name][term_name].reset(batch_ids=env_ids)
         # call all modifiers that are classes
         for mod in self._group_obs_class_instances:
             mod.reset(env_ids=env_ids)
@@ -336,6 +340,11 @@ class ObservationManager(ManagerBase):
                 obs = obs.clip_(min=term_cfg.clip[0], max=term_cfg.clip[1])
             if term_cfg.scale is not None:
                 obs = obs.mul_(term_cfg.scale)
+            # Apply delay if delay buffer is configured for this term
+            if term_name in self._group_obs_term_delay_buffer[group_name]:
+                delay_buffer = self._group_obs_term_delay_buffer[group_name][term_name]
+                delay_buffer.append(obs)
+                obs = delay_buffer.compute()
             # Update the history buffer if observation term has history enabled
             if term_cfg.history_length > 0:
                 circular_buffer = self._group_obs_term_history_buffer[group_name][term_name]
@@ -404,6 +413,7 @@ class ObservationManager(ManagerBase):
         self._group_obs_concatenate_dim: dict[str, int] = dict()
 
         self._group_obs_term_history_buffer: dict[str, dict] = dict()
+        self._group_obs_term_delay_buffer: dict[str, dict[str, StochasticDelayBuffer]] = dict()
         # create a list to store classes instances, e.g., for modifiers and noise models
         # we store it as a separate list to only call reset on them and prevent unnecessary calls
         self._group_obs_class_instances: list[modifiers.ModifierBase | noise.NoiseModel] = list()
@@ -438,6 +448,7 @@ class ObservationManager(ManagerBase):
             self._group_obs_term_cfgs[group_name] = list()
             self._group_obs_class_term_cfgs[group_name] = list()
             group_entry_history_buffer: dict[str, CircularBuffer] = dict()
+            group_entry_delay_buffer: dict[str, StochasticDelayBuffer] = dict()
             # read common config for the group
             self._group_obs_concatenate[group_name] = group_cfg.concatenate_terms
             self._group_obs_concatenate_dim[group_name] = (
@@ -572,6 +583,19 @@ class ObservationManager(ManagerBase):
                     if term_cfg.flatten_history_dim:
                         obs_dims = (obs_dims[0], np.prod(obs_dims[1:]))
 
+                # create delay buffer if delay settings are configured
+                if term_cfg.delay_max_lag > 0:
+                    group_entry_delay_buffer[term_name] = StochasticDelayBuffer(
+                        min_lag=term_cfg.delay_min_lag,
+                        max_lag=term_cfg.delay_max_lag,
+                        batch_size=self._env.num_envs,
+                        device=self._env.device,
+                        per_env=term_cfg.delay_per_env,
+                        hold_prob=term_cfg.delay_hold_prob,
+                        update_period=term_cfg.delay_update_period,
+                        per_env_phase=term_cfg.delay_per_env_phase,
+                    )
+
                 self._group_obs_term_dim[group_name].append(obs_dims[1:])
 
                 # add term in a separate list if term is a class
@@ -581,3 +605,5 @@ class ObservationManager(ManagerBase):
                     term_cfg.func.reset()
             # add history buffers for each group
             self._group_obs_term_history_buffer[group_name] = group_entry_history_buffer
+            # add delay buffers for each group
+            self._group_obs_term_delay_buffer[group_name] = group_entry_delay_buffer

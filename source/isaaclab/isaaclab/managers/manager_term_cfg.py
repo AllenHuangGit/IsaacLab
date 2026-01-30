@@ -193,6 +193,50 @@ class ObservationTermCfg(ManagerTermBaseCfg):
     """Whether or not the observation manager should flatten history-based observation terms to a 2D (N, D) tensor.
     Defaults to True."""
 
+    delay_min_lag: int = 0
+    """Minimum lag (in steps) for stochastic delayed observations. Defaults to 0 (no delay).
+    
+    Lag is sampled uniformly from [min_lag, max_lag] to simulate realistic communication delays.
+    Convert to milliseconds: lag * (1000 / control_hz). For constant delay, set min_lag = max_lag.
+    Only applied if delay_max_lag > 0.
+    """
+
+    delay_max_lag: int = 0
+    """Maximum lag (in steps) for stochastic delayed observations. Defaults to 0 (no delay).
+    
+    If > 0, enables stochastic delay buffer for this observation term. Use min=max for constant delay.
+    The buffer automatically samples delays and manages observation history.
+    """
+
+    delay_per_env: bool = True
+    """Whether each environment samples its own independent lag. Defaults to True.
+    
+    If True, each environment has its own delay pattern. If False, all environments share
+    the same sampled lag at each timestep (synchronized delays).
+    """
+
+    delay_hold_prob: float = 0.0
+    """Probability of keeping the previous lag instead of resampling. Defaults to 0.0.
+    
+    Useful for creating temporally correlated latency patterns (e.g., network conditions
+    that persist for multiple timesteps). Range: [0.0, 1.0].
+    """
+
+    delay_update_period: int = 0
+    """Resample lag every N steps. Defaults to 0 (update every step).
+    
+    Models multi-rate sensors or periodic communication patterns. If 0, lag is resampled
+    every timestep (subject to hold_prob). If N > 0, lag is only updated every N steps.
+    """
+
+    delay_per_env_phase: bool = True
+    """Whether to stagger lag updates across environments. Defaults to True.
+    
+    If True and update_period > 0, each environment gets a random phase offset, causing
+    lag updates to occur on different timesteps. Prevents synchronized resampling across
+    all environments, creating more realistic delay patterns.
+    """
+
 
 @configclass
 class ObservationGroupCfg:
